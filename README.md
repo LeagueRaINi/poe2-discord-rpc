@@ -1,2 +1,11 @@
 # poe2-discord-rpc
-Discord rich presence integration for Path of Exile 2
+
+![PREVIEW](/.github/resources/preview.mp4)
+
+## Features
+
+- Automatically tracks character status the current map
+
+## Current Limitations
+
+Because there is no character API for Path of Exile 2 yet (that i know of) we have to rely on previous log files to identify the current character until there is a new level up event

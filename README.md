@@ -4,7 +4,7 @@
 
 ## Features
 
-- Automatically tracks character status the current map
+- Automatically tracks character status and the current map
 
 ## Current Limitations
 

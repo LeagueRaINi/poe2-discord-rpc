@@ -1,6 +1,6 @@
 # poe2-discord-rpc
 
-![PREVIEW](/.github/resources/preview.mp4)
+![PREVIEW](/.github/resources/preview.gif)
 
 ## Features
 

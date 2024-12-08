@@ -1,13 +1,13 @@
-use std::io::{BufRead, BufReader, ErrorKind, Read};
+use std::io::{BufReader, ErrorKind, Read};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::{env, fs};
 
 use clap::Parser;
-use discord_rich_presence::activity::{Activity, ActivityBuilder, AssetsBuilder, Timestamps};
-use discord_rich_presence::{activity, DiscordIpcClient};
+use discord_rich_presence::activity::{ActivityBuilder, AssetsBuilder, Timestamps};
+use discord_rich_presence::DiscordIpcClient;
 use models::{CharacterClass, ClassAscendency, Translations};
-use regex::{Captures, Regex};
+use regex::Regex;
 
 mod models;
 
@@ -105,12 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let name = translations.get_area_display_name(name).unwrap_or(name);
                 let ts = chrono::Utc::now().timestamp();
 
-                last_instance = Some(MapChangeInfo {
-                    level,
-                    name: name.to_owned(),
-                    seed,
-                    ts,
-                });
+                last_instance = Some(MapChangeInfo { level, name: name.to_owned(), seed, ts });
             }
         }
 

@@ -40,7 +40,7 @@ struct MapChangeInfo {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env::set_var("RUST_LOG", env::var("RUST_LOG").unwrap_or_else(|_| "debug".into()));
+    env::set_var("RUST_LOG", env::var("RUST_LOG").unwrap_or_else(|_| "info".into()));
     pretty_env_logger::init();
 
     let Opt { game_dir, translations } = Opt::parse();
@@ -80,14 +80,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let username = caps.get(1).map_or("", |m| m.as_str());
                 let class = caps.get(2).map_or("", |m| m.as_str());
                 let level = caps.get(3).map_or(0, |m| m.as_str().parse::<u16>().unwrap());
-                log::debug!(
-                    "Parsed level up: {{ class: {class}, name: {username}, level: {level} }}"
-                );
 
                 let ascd_class = ClassAscendency::from_str(class).ok();
                 let main_class = ascd_class.clone().map_or_else(
                     || CharacterClass::from_str(class).unwrap(),
                     |ascd| ascd.get_class(),
+                );
+
+                log::info!(
+                    "Leveled up: {{ username: {username}, class: {main_class}, ascendency: {ascd_class:?}, level: {level} }}"
                 );
 
                 last_class = Some(ClassInfo {
@@ -100,10 +101,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let level = caps.get(1).map_or(0, |m| m.as_str().parse::<u16>().unwrap());
                 let name = caps.get(2).map_or("", |m| m.as_str());
                 let seed = caps.get(3).map_or(0, |m| m.as_str().parse::<u64>().unwrap());
-                log::debug!("Parsed instance: {{ lvl: {level}, name: {name}, seed: {seed} }}");
 
                 let name = translations.get_area_display_name(name).unwrap_or(name);
                 let ts = chrono::Utc::now().timestamp();
+
+                log::info!("Changed instance: {{ lvl: {level}, name: {name}, seed: {seed} }}");
 
                 last_instance = Some(MapChangeInfo { level, name: name.to_owned(), seed, ts });
             }
@@ -138,26 +140,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .timestamps(Timestamps::new(Some(instance_info.ts), None));
             }
 
-            let act = act_builder.build();
-
-            match rpc.set_activity(act.clone()) {
-                Ok(_) => log::debug!("Updated activity"),
-                Err(e) => {
-                    if let Some(e) = e.downcast_ref::<std::io::Error>() {
-                        match e.kind() {
-                            ErrorKind::BrokenPipe => {
-                                log::error!("Connection to discord lost, attempting to reconnect");
-                                rpc.reconnect()?;
-
-                                // not entirely sure how we should handle this... but it happens quite often and i'm not sure why
-                                rpc.set_activity(act)?;
-                                log::info!("Updated activity after reconnecting");
-                            },
-                            _ => log::error!("Error updating discord presence: {}", e),
-                        }
-                    }
-                },
+            if !rpc.connected() {
+                log::error!("Connection to discord lost, attempting to reconnect...");
+                rpc.reconnect()?;
             }
+
+            rpc.set_activity(act_builder.build())?;
+            log::info!("Updated activity");
         }
     }
 }

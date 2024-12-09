@@ -11,16 +11,18 @@ use regex::Regex;
 
 mod models;
 
+const DEFAULT_TRANSLATIONS: &str = include_str!("../resources/translations_en.json");
+
 #[derive(Parser, Debug)]
 #[clap(about, author, version)]
 struct Opt {
     /// Path to the game directory
-    #[arg(long)]
+    #[arg(short, long)]
     game_dir: PathBuf,
 
     /// Path to translations.json
-    #[arg(long)]
-    translations: PathBuf,
+    #[arg(short, long)]
+    translations_file: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -43,10 +45,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env::set_var("RUST_LOG", env::var("RUST_LOG").unwrap_or_else(|_| "info".into()));
     pretty_env_logger::init();
 
-    let Opt { game_dir, translations } = Opt::parse();
+    let Opt { game_dir, translations_file } = Opt::parse();
 
-    let translations = fs::read_to_string(translations)?;
-    let translations: Translations = serde_json::from_str(&translations)?;
+    let translations: Translations = serde_json::from_str(
+        &translations_file
+            .map(|f| fs::read_to_string(f).unwrap())
+            .unwrap_or(DEFAULT_TRANSLATIONS.to_string()),
+    )?;
     log::debug!("{:#?}", translations);
 
     let log_file = game_dir.join("logs/Client.txt");

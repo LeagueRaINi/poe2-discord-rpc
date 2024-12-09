@@ -1,11 +1,11 @@
-use std::io::{BufReader, ErrorKind, Read};
+use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::{env, fs};
 
 use clap::Parser;
-use discord_rich_presence::activity::{ActivityBuilder, AssetsBuilder, Timestamps};
-use discord_rich_presence::DiscordIpcClient;
+use discord_rich_presence::activity::{Activity, Assets, Timestamps};
+use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use models::{CharacterClass, ClassAscendency, Translations};
 use regex::Regex;
 
@@ -52,9 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_file = game_dir.join("logs/Client.txt");
     let log_file = fs::File::open(log_file)?;
 
-    let mut rpc = DiscordIpcClient::new("550890770056347648");
+    let mut rpc = DiscordIpcClient::new("550890770056347648")?;
     rpc.connect()?;
-    rpc.set_activity(ActivityBuilder::default().details("Booting up...").build())?;
+    rpc.set_activity(Activity::new().details("Booting up..."))?;
 
     let mut log_bufr = BufReader::new(log_file);
 
@@ -112,40 +112,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if last_class.is_some() || last_instance.is_some() {
-            let mut act_builder = ActivityBuilder::default();
+            let mut act = Activity::new();
 
             if let Some(class_info) = last_class.take() {
-                act_builder = act_builder.details(&class_info.username);
+                act = act.details(class_info.username);
 
-                let mut asset_builder = AssetsBuilder::default();
+                let mut assets = Assets::default();
 
                 if let Some(ascd) = class_info.ascendency {
-                    asset_builder = asset_builder
+                    assets = assets
                         .large_image(ascd.get_discord_image_name())
                         .large_text(format!("{ascd} ({})", class_info.level))
                         .small_image(class_info.class.get_discord_image_name())
                         .small_text(class_info.class);
                 } else {
-                    asset_builder = asset_builder
+                    assets = assets
                         .large_image(class_info.class.get_discord_image_name())
                         .large_text(format!("{} ({})", class_info.class, class_info.level));
                 }
 
-                act_builder = act_builder.assets(asset_builder.build());
+                act = act.assets(assets);
             }
 
             if let Some(instance_info) = last_instance.take() {
-                act_builder = act_builder
+                act = act
                     .state(format!("{} ({})", &instance_info.name, instance_info.level))
-                    .timestamps(Timestamps::new(Some(instance_info.ts), None));
+                    .timestamps(Timestamps::default().start(instance_info.ts));
             }
 
-            if !rpc.connected() {
-                log::error!("Connection to discord lost, attempting to reconnect...");
-                rpc.reconnect()?;
-            }
-
-            rpc.set_activity(act_builder.build())?;
+            rpc.set_activity(act)?;
             log::info!("Updated activity");
         }
     }

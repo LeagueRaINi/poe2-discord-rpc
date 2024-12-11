@@ -93,11 +93,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let level_up_rgx = Regex::new(r#": (\w+) \((\w+)\) is now level (\d+)"#)?;
     let instance_rgx = Regex::new(r#"] Generating level (\d+) area "([^"]+)" with seed (\d+)"#)?;
+    let joined_area_rgx = Regex::new(r#": (\w+) has joined the area."#)?;
 
     let mut log_bufr = BufReader::new(log_file);
 
     let mut last_instance: Option<MapChangeInfo> = None;
     let mut last_class: Option<ClassInfo> = None;
+
+    let mut char_blacklist: Vec<String> = Vec::new();
 
     log::trace!("Starting main loop");
     loop {
@@ -121,10 +124,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             for line in log.lines() {
-                if let Some(caps) = level_up_rgx.captures(line) {
+                if let Some(caps) = joined_area_rgx.captures(line) {
+                    let username = caps.get(1).map_or("", |m| m.as_str());
+                    log::trace!("Joined area: {{ username: {username} }}");
+                    if !char_blacklist.contains(&username.to_owned()) {
+                        char_blacklist.push(username.to_owned());
+                    }
+                } else if let Some(caps) = level_up_rgx.captures(line) {
                     let username = caps.get(1).map_or("", |m| m.as_str());
                     let class = caps.get(2).map_or("", |m| m.as_str());
                     let level = caps.get(3).map_or(0, |m| m.as_str().parse::<u16>().unwrap());
+
+                    if char_blacklist.contains(&username.to_owned()) {
+                        continue;
+                    }
 
                     let ascd_class = ClassAscendency::from_str(class).ok();
                     let main_class = ascd_class.clone().map_or_else(

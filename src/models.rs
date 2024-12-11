@@ -159,3 +159,19 @@ impl Translations {
         self.areas.get(area).map(|s| s.as_str())
     }
 }
+
+#[derive(Debug)]
+pub struct ClassInfo {
+    pub class: CharacterClass,
+    pub ascendency: Option<ClassAscendency>,
+    pub username: String,
+    pub level: u16,
+}
+
+#[derive(Debug)]
+pub struct MapChangeInfo {
+    pub level: u16,
+    pub name: String,
+    pub seed: u64,
+    pub ts: i64,
+}

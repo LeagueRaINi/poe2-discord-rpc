@@ -155,8 +155,12 @@ pub struct Translations {
 }
 
 impl Translations {
-    pub fn get_area_display_name(&self, area: &str) -> Option<&str> {
-        self.areas.get(area).map(|s| s.as_str())
+    pub fn get_area_display_name(&self, area: &str) -> Option<String> {
+        let (name, is_cruel) = area.strip_prefix("C_").map_or((area, false), |s| (s, true));
+        self.areas.get(name).map(|area_name| match is_cruel {
+            true => format!("Cruel {area_name}"),
+            false => area_name.to_owned(),
+        })
     }
 }
 

@@ -160,12 +160,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let name = caps.get(2).map_or("", |m| m.as_str());
                     let seed = caps.get(3).map_or(0, |m| m.as_str().parse::<u64>().unwrap());
 
-                    let name = translations.get_area_display_name(name).unwrap_or(name);
+                    let name = translations.get_area_display_name(name).unwrap_or(name.to_owned());
                     let ts = chrono::Utc::now().timestamp();
 
                     log::trace!("Instance change: {{ lvl: {level}, name: {name}, seed: {seed} }}");
 
-                    last_instance = Some(MapChangeInfo { level, name: name.to_owned(), seed, ts });
+                    last_instance = Some(MapChangeInfo { level, name, seed, ts });
                 }
             }
 

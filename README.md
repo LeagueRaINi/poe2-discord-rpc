@@ -8,4 +8,9 @@
 
 ## Current Limitations
 
-Because there is no character API for Path of Exile 2 yet (that i know of) we have to rely on previous log files to identify the current character until there is a new level up event
+Currently, Path of Exile 2 doesn't have a character API, so the app relies on previous log files. This means when you switch accounts, it might show the wrong character until that character levels up.
+
+## TODO
+
+- [ ] Implement character API (when it releases)
+- [ ] Add tray icon and remove console window

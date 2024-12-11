@@ -4,7 +4,7 @@
 
 ## Features
 
-- Automatically tracks character status and the current map
+- Tracks your character status like the level, ascendency, and current map you are playing and displays it as your Discord activity.
 
 ## Current Limitations
 

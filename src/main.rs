@@ -1,12 +1,12 @@
-use std::io::{BufReader, Read, Seek};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::{fs, thread};
 
 use clap::Parser;
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
-use models::{CharacterClass, ClassAscendency, ClassInfo, MapChangeInfo, Translations};
+use lazy_static::lazy_static;
+use models::{ClassInfo, MapChangeInfo, Translations};
 use regex::Regex;
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 
@@ -20,6 +20,12 @@ const DEFAULT_DIRECTORIES: [&str; 2] = [
 
 const PROCESS_NAMES: [&str; 4] =
     ["PathOfExile_x64Steam.exe", "PathOfExile_x64.exe", "PathOfExileSteam.exe", "PathOfExile.exe"];
+
+lazy_static! {
+    static ref RGX_GENERATING_AREA: Regex = Regex::new(r#"] Generating level (\d+) area "([^"]+)" with seed (\d+)"#).unwrap();
+    static ref RGX_JOINED_AREA: Regex = Regex::new(r#": (\w+) has joined the area."#).unwrap();
+    static ref RGX_LEVEL_UP: Regex = Regex::new(r#": (\w+) \((\w+)\) is now level (\d+)"#).unwrap();
+}
 
 #[derive(Parser, Debug)]
 #[clap(about, author, version)]
@@ -91,18 +97,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     log::info!("Created sysinfo");
 
-    let level_up_rgx = Regex::new(r#": (\w+) \((\w+)\) is now level (\d+)"#)?;
-    let instance_rgx = Regex::new(r#"] Generating level (\d+) area "([^"]+)" with seed (\d+)"#)?;
-    let joined_area_rgx = Regex::new(r#": (\w+) has joined the area."#)?;
-
     let mut log_bufr = BufReader::new(log_file);
 
-    let mut last_instance: Option<MapChangeInfo> = None;
+    let mut activity = Activity::new();
+    let mut last_area: Option<MapChangeInfo> = None;
     let mut last_class: Option<ClassInfo> = None;
+    let mut user_blacklist: Vec<String> = Vec::new();
 
-    let mut char_blacklist: Vec<String> = Vec::new();
-
-    log::trace!("Starting main loop");
+    log::info!("Starting main loop");
     loop {
         if !is_poe_running(&mut sys) {
             thread::sleep(std::time::Duration::from_secs(5));
@@ -112,95 +114,82 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rpc.connect()?;
         log::trace!("Connected to discord rpc");
 
-        // I'm lazy so lets seek back to start to set the activity after reconnecting
-        log_bufr.seek(std::io::SeekFrom::Start(0))?;
+        let mut log_str = String::new();
+        log_bufr.read_to_string(&mut log_str)?;
+
+        RGX_JOINED_AREA.captures_iter(&log_str).for_each(|caps| {
+            if let Some(username) = caps.get(1) {
+                user_blacklist.push(username.as_str().to_owned());
+            }
+        });
+        log::trace!("Initial user blacklist: {user_blacklist:#?}");
+
+        if let Some(last_class_info) = RGX_LEVEL_UP
+            .captures_iter(&log_str)
+            .filter_map(|caps| ClassInfo::parse_from_capture(&caps, &user_blacklist))
+            .last()
+        {
+            last_class = Some(last_class_info);
+        }
+        log::trace!("Initial class info: {last_class:#?}");
+
+        log_bufr.seek(SeekFrom::End(0))?;
 
         while is_poe_running(&mut sys) {
-            let mut log = String::new();
+            let mut log_line = String::new();
 
-            if log_bufr.read_to_string(&mut log)? == 0 {
+            if log_bufr.read_line(&mut log_line)? == 0 {
+                if last_class.is_some() || last_area.is_some() {
+                    log::info!(
+                        "Updating activity {{ class: {last_class:#?}, instance: {last_area:#?} }}"
+                    );
+
+                    if let Some(mut class_info) = last_class.take() {
+                        activity = activity.details(class_info.username);
+
+                        let mut assets = Assets::default();
+                        if let Some(ascd) = class_info.ascendency.take() {
+                            assets = assets
+                                .large_image(ascd.get_discord_image_name())
+                                .large_text(format!("{ascd} ({})", class_info.level))
+                                .small_image(class_info.class.get_discord_image_name())
+                                .small_text(class_info.class);
+                        } else {
+                            assets = assets
+                                .large_image(class_info.class.get_discord_image_name())
+                                .large_text(format!("{} ({})", class_info.class, class_info.level));
+                        }
+
+                        activity = activity.assets(assets);
+                    }
+
+                    if let Some(instance_info) = last_area.take() {
+                        activity = activity
+                            .state(format!("{} ({})", &instance_info.name, instance_info.level))
+                            .timestamps(Timestamps::default().start(instance_info.ts));
+                    }
+
+                    rpc.set_activity(activity.clone())?;
+                }
                 thread::sleep(std::time::Duration::from_millis(500));
                 continue;
             }
 
-            for line in log.lines() {
-                if let Some(caps) = joined_area_rgx.captures(line) {
-                    let username = caps.get(1).map_or("", |m| m.as_str());
-                    log::trace!("Joined area: {{ username: {username} }}");
-                    if !char_blacklist.contains(&username.to_owned()) {
-                        char_blacklist.push(username.to_owned());
-                    }
-                } else if let Some(caps) = level_up_rgx.captures(line) {
-                    let username = caps.get(1).map_or("", |m| m.as_str());
-                    let class = caps.get(2).map_or("", |m| m.as_str());
-                    let level = caps.get(3).map_or(0, |m| m.as_str().parse::<u16>().unwrap());
-
-                    if char_blacklist.contains(&username.to_owned()) {
-                        continue;
-                    }
-
-                    let ascd_class = ClassAscendency::from_str(class).ok();
-                    let main_class = ascd_class.clone().map_or_else(
-                        || CharacterClass::from_str(class).unwrap(),
-                        |ascd| ascd.get_class(),
-                    );
-
-                    log::trace!(
-                        "Level up: {{ username: {username}, class: {main_class}, ascendency: {ascd_class:?}, level: {level} }}"
-                    );
-
-                    last_class = Some(ClassInfo {
-                        class: main_class,
-                        ascendency: ascd_class,
-                        username: username.to_owned(),
-                        level,
-                    });
-                } else if let Some(caps) = instance_rgx.captures(line) {
-                    let level = caps.get(1).map_or(0, |m| m.as_str().parse::<u16>().unwrap());
-                    let name = caps.get(2).map_or("", |m| m.as_str());
-                    let seed = caps.get(3).map_or(0, |m| m.as_str().parse::<u64>().unwrap());
-
-                    let name = translations.get_area_display_name(name).unwrap_or(name.to_owned());
-                    let ts = chrono::Utc::now().timestamp();
-
-                    log::trace!("Instance change: {{ lvl: {level}, name: {name}, seed: {seed} }}");
-
-                    last_instance = Some(MapChangeInfo { level, name, seed, ts });
+            if let Some(class_info) = RGX_LEVEL_UP
+                .captures(&log_line)
+                .and_then(|caps| ClassInfo::parse_from_capture(&caps, &user_blacklist))
+            {
+                last_class = Some(class_info);
+            } else if let Some(area_info) = RGX_GENERATING_AREA
+                .captures(&log_line)
+                .map(|caps| MapChangeInfo::parse_from_captures(&caps, &translations))
+            {
+                last_area = Some(area_info);
+            } else if let Some(caps) = RGX_JOINED_AREA.captures(&log_line) {
+                let username = caps[1].to_string();
+                if !user_blacklist.contains(&username) {
+                    user_blacklist.push(username);
                 }
-            }
-
-            if last_class.is_some() || last_instance.is_some() {
-                log::info!(
-                    "Updating activity {{ class: {last_class:#?}, instance: {last_instance:#?} }}"
-                );
-
-                let mut act = Activity::new();
-                if let Some(class_info) = last_class.take() {
-                    act = act.details(class_info.username);
-
-                    let mut assets = Assets::default();
-                    if let Some(ascd) = class_info.ascendency {
-                        assets = assets
-                            .large_image(ascd.get_discord_image_name())
-                            .large_text(format!("{ascd} ({})", class_info.level))
-                            .small_image(class_info.class.get_discord_image_name())
-                            .small_text(class_info.class);
-                    } else {
-                        assets = assets
-                            .large_image(class_info.class.get_discord_image_name())
-                            .large_text(format!("{} ({})", class_info.class, class_info.level));
-                    }
-                    act = act.assets(assets);
-                }
-
-                if let Some(instance_info) = last_instance.take() {
-                    act = act
-                        .state(format!("{} ({})", &instance_info.name, instance_info.level))
-                        .timestamps(Timestamps::default().start(instance_info.ts));
-                }
-
-                rpc.set_activity(act)?;
-                log::trace!("Set activity");
             }
         }
 

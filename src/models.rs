@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
+use regex::Captures;
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
@@ -172,10 +173,47 @@ pub struct ClassInfo {
     pub level: u16,
 }
 
+impl ClassInfo {
+    pub fn parse_from_capture(caps: &Captures, user_blacklist: &[String]) -> Option<Self> {
+        let username = caps.get(1).map_or("", |m| m.as_str());
+        let class = caps.get(2).map_or("", |m| m.as_str());
+        let level = caps.get(3).map_or(0, |m| m.as_str().parse::<u16>().unwrap());
+
+        if user_blacklist.contains(&username.to_owned()) {
+            return None;
+        }
+
+        let ascd_class = ClassAscendency::from_str(class).ok();
+        let main_class = ascd_class
+            .clone()
+            .map_or_else(|| CharacterClass::from_str(class).unwrap(), |ascd| ascd.get_class());
+
+        Some(Self {
+            class: main_class,
+            ascendency: ascd_class,
+            username: username.to_owned(),
+            level,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct MapChangeInfo {
     pub level: u16,
     pub name: String,
     pub seed: u64,
     pub ts: i64,
+}
+
+impl MapChangeInfo {
+    pub fn parse_from_captures(caps: &Captures, translations: &Translations) -> Self {
+        let level = caps.get(1).map_or(0, |m| m.as_str().parse::<u16>().unwrap());
+        let name = caps.get(2).map_or("", |m| m.as_str());
+        let seed = caps.get(3).map_or(0, |m| m.as_str().parse::<u64>().unwrap());
+
+        let name = translations.get_area_display_name(name).unwrap_or(name.to_owned());
+        let ts = chrono::Utc::now().timestamp();
+
+        Self { level, name: name.to_owned(), seed, ts }
+    }
 }
